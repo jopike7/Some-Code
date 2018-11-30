@@ -1,0 +1,76 @@
+udata <- read.table("~/Desktop/u.data")
+colnames(udata) = c("user_id", "item_id", "rating", "timestamp")
+udata = udata[ , -which(names(udata) %in% c("timestamp"))]
+
+summary(udata)
+hist(udata$rating)
+
+### Working with the Dataset
+num_ratings = nrow(udata)
+num_movies = length(unique(udata$item_id))
+num_users = length(unique(udata$user_id))
+sparsity = num_ratings / (num_movies * num_users) * 100
+print(c('Sparsity of Dataset is', sparsity))
+
+### Data Partitions
+# Not including users that have fewer than 50 ratings
+udata = udata[ udata$user_id %in% names(table(udata$user_id))[table(udata$user_id) > 50] , ]
+num_ratings = nrow(udata)
+num_movies = length(unique(udata$item_id))
+num_users = length(unique(udata$user_id))
+sparsity = num_ratings / (num_movies * num_users) * 100
+print(c('Updated Sparsity of Dataset is', sparsity))
+      
+### Train/Test Split
+library('recommenderlab')
+# First, convert our data type to a recommenderlab compatible type
+udata_new = as(udata, "realRatingMatrix")
+# Now, apply a split of 0.7 train, 0.3 test
+# Need to tell recommender lab what the top rating is (5)
+udata_split = evaluationScheme(udata_new, method="split", train=0.7, given=15, goodRating=5)
+train = getData(udata_split, "train")
+test_X = getData(udata_split, "known")
+test_Y = getData(udata_split, "unknown")
+
+### Integrating a Popularity Recommender
+# Create recommender object from the data
+rec_pop = Recommender(train, method="POPULAR")
+# Evaluate it on our test set
+predicted = predict(rec_pop, test_X, type="ratings")
+error = calcPredictionAccuracy(predicted, test_Y)
+error
+
+### Integrating a Collaborative Filtering Recommender
+# Using UBCF, but unfortunately it doesnt support regularization parameters so we call again
+val_split = evaluationScheme(train, method="split", train=0.7, given=15, goodRating=5)
+train_real = getData(val_split, "train")
+val_X = getData(val_split, "known")
+val_Y = getData(val_split, "unknown")
+# Create model
+rec_ubcf = Recommender(train_real, "UBCF")
+predicted_ubcf = predict(rec_ubcf, val_X, type="ratings")
+# Compute RMSE
+error_ubcf = calcPredictionAccuracy(predicted_ubcf, val_Y)
+print(error_ubcf)
+
+### Integrating an Item-Item Similarity Recommender
+# Create model
+rec_ibcf = Recommender(train, "IBCF")
+predicted_ibcf = predict(rec_ibcf, test_X, type="ratings")
+# Compute RMSE
+error_ibcf = calcPredictionAccuracy(predicted_ibcf, test_Y)
+error_ibcf
+
+### Getting Top k Recommendations
+# We let k= 5 and 10 for simplicity
+results_pop <- evaluate(udata_split, method="POPULAR", type="topNList", n=c(5,10))
+results_ubcf <- evaluate(udata_split, method="UBCF", type="topNList", n=c(5, 10))
+results_ibcf <- evaluate(udata_split, method="IBCF", type="topNList", n=c(5, 10))
+# Top 5 predictions for user with id 1
+user_recs = predict(rec_pop, test_X, n=5, type="topNList")
+user_recs@items[1]
+
+### Evaluation: Confusion Matric, Precision and Recall
+print(c('Popularity', results_pop@results))
+print(c('Collaborative Filtering', results_ubcf@results))
+print(c('Item-Item Similarity', results_ibcf@results))
